@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Melon Jelly — Material Studies No. 009</title>
+<meta name="description" content="An interactive soft-body watermelon jelly slice, simulated with XPBD and rendered with native WebGPU.">
+<style>
+:root {
+  --bg: #ebe9e4;
+  --ink: #1b1a19;
+  --mute: #6d6a65;
+  --line: rgba(27, 26, 25, .2);
+  --line-strong: rgba(27, 26, 25, .55);
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --gutter: clamp(16px, 2.4vw, 32px);
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); -webkit-text-size-adjust: 100%; }
+body { min-height: 100svh; }
+button, input { font: inherit; color: inherit; }
+.label { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; }
+
+.app {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-rows: auto 1fr auto;
+  height: 100svh;
+  min-height: 560px;
+}
+.stage { grid-column: 1; grid-row: 1 / -1; position: relative; min-width: 0; overflow: hidden; }
+#canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; user-select: none; -webkit-user-select: none; outline: none; }
+
+.head { grid-column: 1; grid-row: 1; z-index: 2; padding: var(--gutter) var(--gutter) 0; pointer-events: none; align-self: start; }
+.eyebrow { margin: 0 0 14px; color: var(--ink); }
+h1 {
+  margin: 0; font-family: var(--serif); font-style: italic; font-weight: 400;
+  font-size: clamp(56px, 8.4vw, 124px); line-height: .88; letter-spacing: -.02em;
+}
+h1 span { display: block; }
+.caption { margin: 18px 0 0; max-width: 34ch; font-size: 12.5px; line-height: 1.55; color: var(--mute); }
+.caption i { font-family: var(--serif); font-size: 14px; color: var(--ink); }
+
+.status {
+  grid-column: 1; grid-row: 1; justify-self: end; align-self: start; z-index: 2;
+  margin: var(--gutter) var(--gutter) 0 0; display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border: 1px solid var(--line-strong); background: color-mix(in srgb, var(--bg) 70%, transparent);
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+}
+.status .dot { width: 7px; height: 7px; border-radius: 50%; background: #b9b5ae; }
+.status[data-state="live"] .dot { background: #2f8f55; animation: pulse 2.2s ease-in-out infinite; }
+.status[data-state="off"] .dot { background: #b5412f; }
+@keyframes pulse { 50% { opacity: .35; } }
+
+.foot-l { grid-column: 1; grid-row: 3; z-index: 2; align-self: end; justify-self: start; padding: 0 var(--gutter) var(--gutter); max-width: min(560px, 62%); pointer-events: none; }
+.hint { margin: 0 0 16px; font-size: 12.5px; line-height: 1.55; color: var(--mute); max-width: 44ch; transition: opacity .6s; }
+.hint.seen { opacity: .45; }
+.hint b { color: var(--ink); font-weight: 600; }
+.readouts { display: grid; grid-template-columns: repeat(3, auto); gap: 0; border-top: 1px solid var(--line-strong); width: max-content; max-width: 100%; }
+.readouts > div { padding: 9px 22px 0 0; margin-right: 22px; border-right: 1px solid var(--line); }
+.readouts > div:last-child { border-right: 0; margin-right: 0; }
+.readouts dt { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--mute); }
+.readouts dd { margin: 4px 0 0; font-family: var(--mono); font-size: 15px; font-variant-numeric: tabular-nums; min-width: 6.4ch; }
+.units { margin: 8px 0 0; font-size: 10.5px; line-height: 1.45; color: var(--mute); max-width: 52ch; }
+
+.foot-r { grid-column: 1; grid-row: 3; z-index: 3; align-self: end; justify-self: end; padding: 0 var(--gutter) var(--gutter); width: min(340px, 40%); }
+details { border: 1px solid var(--line-strong); background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+summary { list-style: none; cursor: pointer; padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; }
+summary::-webkit-details-marker { display: none; }
+summary::after { content: "+"; font-family: var(--mono); font-size: 14px; }
+details[open] summary::after { content: "–"; }
+details .body { padding: 0 12px 12px; font-size: 12px; line-height: 1.55; color: #3a3836; max-height: 44svh; overflow: auto; }
+details h3 { margin: 12px 0 4px; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--mute); font-weight: 500; }
+details p { margin: 0 0 6px; }
+summary:focus-visible, button:focus-visible, input:focus-visible + .box, .preset:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+.panel { grid-column: 2; grid-row: 1 / -1; border-left: 1px solid var(--line-strong); padding: var(--gutter); display: flex; flex-direction: column; gap: 22px; overflow: auto; background: var(--bg); z-index: 4; }
+.panel h2 { margin: 0; padding-bottom: 12px; border-bottom: 1px solid var(--line-strong); font-weight: 500; }
+.group { display: flex; flex-direction: column; gap: 10px; }
+.group > .label { color: var(--mute); }
+.presets { display: grid; gap: 6px; }
+.preset { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border: 1px solid var(--line); background: transparent; cursor: pointer; text-align: left; font-size: 13px; transition: border-color .2s, background .2s; }
+.preset:hover { border-color: var(--line-strong); }
+.preset[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.sw { width: 26px; height: 26px; flex: none; border: 1px solid rgba(0, 0, 0, .25); }
+.slider .row { display: flex; justify-content: space-between; align-items: baseline; }
+.slider output { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.slider small { color: var(--mute); font-size: 10.5px; display: flex; justify-content: space-between; margin-top: 2px; }
+input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 24px; margin: 0; background: transparent; cursor: pointer; }
+input[type=range]::-webkit-slider-runnable-track { height: 1px; background: var(--ink); }
+input[type=range]::-moz-range-track { height: 1px; background: var(--ink); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -7px; border-radius: 50%; background: var(--bg); border: 1px solid var(--ink); }
+input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--bg); border: 1px solid var(--ink); }
+input[type=range]:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.btn { padding: 10px 12px; border: 1px solid var(--ink); background: transparent; cursor: pointer; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; transition: background .15s, color .15s; }
+.btn:hover { background: var(--ink); color: var(--bg); }
+.btn.wide { grid-column: 1 / -1; border-color: var(--line-strong); }
+.check { display: flex; align-items: center; gap: 10px; font-size: 13px; cursor: pointer; }
+.check input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.check .box { width: 14px; height: 14px; border: 1px solid var(--ink); display: grid; place-items: center; flex: none; }
+.check input:checked + .box::after { content: ""; width: 8px; height: 8px; background: var(--ink); }
+.checks { display: grid; gap: 10px; }
+
+.nogpu { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; z-index: 5; text-align: left; }
+.nogpu[hidden], #gpuerr[hidden] { display: none; }
+.nogpu div { max-width: 46ch; border: 1px solid var(--line-strong); padding: 22px; background: var(--bg); }
+.nogpu h2 { margin: 0 0 10px; font-family: var(--serif); font-style: italic; font-weight: 400; font-size: 28px; }
+.nogpu p { margin: 0; font-size: 13.5px; line-height: 1.6; color: #3a3836; }
+#gpuerr { position: absolute; left: var(--gutter); right: var(--gutter); top: 50%; z-index: 5; padding: 10px 12px; border: 1px solid #b5412f; background: var(--bg); font-family: var(--mono); font-size: 11.5px; color: #8a2b1c; }
+noscript { position: absolute; inset: 0; display: grid; place-items: center; z-index: 6; background: var(--bg); padding: 24px; }
+
+@media (max-width: 880px) {
+  .app { display: flex; flex-direction: column; height: auto; min-height: 0; position: relative; }
+  .head { order: 1; } .stage { order: 2; } .panel { order: 3; } .foot-l { order: 4; } .foot-r { order: 5; }
+  .stage { position: relative; height: min(86vw, 62svh); min-height: 320px; margin-top: 0; }
+  .head, .status, .foot-l, .foot-r { position: relative; grid-column: auto; }
+  .head { padding: 18px var(--gutter) 10px; }
+  .status { position: absolute; top: 14px; right: 14px; margin: 0; z-index: 6; }
+  h1 { font-size: clamp(52px, 17vw, 84px); }
+  .caption { margin-top: 12px; }
+  .stage { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .panel { border-left: 0; border-bottom: 1px solid var(--line-strong); overflow: visible; }
+  .foot-l { max-width: none; padding: 20px var(--gutter) 6px; pointer-events: auto; }
+  .foot-r { width: auto; padding: 6px var(--gutter) 28px; }
+  details .body { max-height: none; }
+  .readouts { grid-template-columns: repeat(3, auto); }
+  .readouts > div { padding-right: 14px; margin-right: 14px; }
+}
+@media (max-height: 640px) and (min-width: 881px) {
+  h1 { font-size: clamp(44px, 7vw, 84px); }
+  .caption { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<main class="app">
+  <section class="stage" aria-label="Interactive watermelon jelly">
+    <canvas id="canvas" tabindex="0" aria-label="A translucent watermelon jelly slice. Drag it to stretch it; drag the background to orbit."></canvas>
+    <div class="nogpu" id="nogpu" hidden role="alert"><div><h2></h2><p></p></div></div>
+    <div id="gpuerr" hidden role="alert"></div>
+  </section>
+
+  <header class="head">
+    <p class="eyebrow label">Material Studies / No. 009</p>
+    <h1><span>Melon</span><span>Jelly.</span></h1>
+    <p class="caption"><i>A slice of summer.</i> A little wobble. <i>Too soft to share.</i></p>
+  </header>
+
+  <div class="status" id="status" data-state="idle" role="status"><i class="dot"></i><span>WEBGPU · STARTING</span></div>
+
+  <div class="foot-l">
+    <p class="hint" id="hint"><b>Grab it.</b> Press and drag the tip, a corner, the flesh or the rind to stretch and lift the slice; let go to watch it wobble. Scroll, <b>Q</b>/<b>E</b> or a second finger twists what you hold. Drag the empty studio to orbit.</p>
+    <dl class="readouts" aria-label="Live simulation readouts">
+      <div><dt>Mass</dt><dd id="rMass">—</dd></div>
+      <div><dt>Volume</dt><dd id="rVol">—</dd></div>
+      <div><dt>Kinetic energy</dt><dd id="rKE">—</dd></div>
+    </dl>
+    <p class="units">Illustrative units: 1 sim unit ≈ 5 cm, density ≈ 1.02 g/cm³, so mass and energy are approximate. Volume is relative to the rest shape.</p>
+  </div>
+
+  <div class="foot-r">
+    <details>
+      <summary class="label">Inside the experiment</summary>
+      <div class="body">
+        <h3>Physics</h3>
+        <p>The slice is a tetrahedral mesh of about 8,700 elements, simulated on the CPU with XPBD (extended position-based dynamics) in small fixed steps. Every edge is a soft spring, every tetrahedron keeps its volume, and the pale rind and skin are about 2.4× firmer than the flesh.</p>
+        <p>Your pointer pins a small patch of nodes, so the jelly stretches locally. Floor contact has Coulomb friction and a little restitution, and internal damping bleeds energy from edge vibrations so it wobbles, then settles.</p>
+        <p>Seeds and air bubbles are anchored with barycentric coordinates to the mesh, so they ride the deformation and rotate with the surface.</p>
+        <h3>Rendering</h3>
+        <p>Native WebGPU and WGSL. A back-face pass records the exit normal and distance, giving the thickness for Beer–Lambert absorption (ruby where it is thick, pale where it is thin). The studio is refracted through the slab with a touch of dispersion and cloudiness, then Fresnel reflections and glossy highlights are added.</p>
+        <p>The flesh, pale rind and skin each have their own material response. Soft floor shadows come from sphere proxies that follow the body, tinted by the light passing through it. The render is 4× MSAA.</p>
+      </div>
+    </details>
+  </div>
+
+  <aside class="panel" aria-label="Controls">
+    <h2 class="label">The Specimen</h2>
+    <div class="group">
+      <span class="label">Colourway</span>
+      <div class="presets" id="presets" role="group" aria-label="Colour presets"></div>
+    </div>
+    <div class="group">
+      <div class="slider">
+        <div class="row"><label class="label" for="firm">Firmness</label><output id="firmV" for="firm">0.50</output></div>
+        <input type="range" id="firm" min="0" max="100" value="50" aria-describedby="firmV">
+        <small><span>set</span><span>firm</span></small>
+      </div>
+      <div class="slider">
+        <div class="row"><label class="label" for="damp">Internal damping</label><output id="dampV" for="damp">0.35</output></div>
+        <input type="range" id="damp" min="0" max="100" value="35" aria-describedby="dampV">
+        <small><span>jiggly</span><span>sluggish</span></small>
+      </div>
+    </div>
+    <div class="btns">
+      <button class="btn" id="nudge" type="button">Give it a nudge</button>
+      <button class="btn" id="reset" type="button">Reset</button>
+      <button class="btn wide" id="pause" type="button" aria-pressed="false">Pause</button>
+    </div>
+    <div class="checks">
+      <label class="check"><input type="checkbox" id="slow"><span class="box"></span>¼ speed</label>
+      <label class="check"><input type="checkbox" id="mesh"><span class="box"></span>Show mesh</label>
+    </div>
+  </aside>
+</main>
+<noscript>Melon Jelly needs JavaScript and a WebGPU-capable browser.</noscript>
+<script>
+/*__SIM__*/
+/*__SHADERS__*/
+/*__APP__*/
+</script>
+</body>
+</html>
